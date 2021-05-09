@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"math/big"
-	"os"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -26,7 +25,7 @@ type service struct {
 	db *gorm.DB
 }
 
-var rpcEndpoint = os.Getenv("RPC_ENDPOINT")
+const rpcEndpoint = "https://data-seed-prebsc-2-s3.binance.org:8545"
 
 func New(db *gorm.DB) EthereumService {
 	ec, err := ethclient.Dial(rpcEndpoint)
@@ -53,13 +52,15 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 
 	var wg sync.WaitGroup
 
-	blocksToCreate := make([]*model.Block, 0, limit)
+	newCount := 0
+	newBlocks := make(chan *model.Block, limit)
 	var index int
 	for num := toNumber; num >= fromNumber; num-- {
 		if index < len(savedBlocks) && savedBlocks[index].BlockNum == num {
 			index++
 			continue
 		}
+		newCount++
 		wg.Add(1)
 		go func(num uint64) {
 			defer wg.Done()
@@ -68,11 +69,16 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 				log.Printf("BlockByNumber failed: %+v", err)
 				return
 			}
-			blocksToCreate = append(blocksToCreate, model.NewBlock(block))
+			newBlocks <- model.NewBlock(block)
 		}(num)
 	}
 	wg.Wait()
+	close(newBlocks)
 
+	blocksToCreate := make([]*model.Block, 0, newCount)
+	for b := range newBlocks {
+		blocksToCreate = append(blocksToCreate, b)
+	}
 	err = s.db.Clauses(clause.OnConflict{UpdateAll: true}).
 		Create(blocksToCreate).Error
 	if err != nil {

@@ -1,13 +1,16 @@
 package main
 
 import (
-	"Kumazan/go-ethereum-server/db"
+	"log"
+
+	"Kumazan/go-ethereum-server/pkg/grpc"
 	"Kumazan/go-ethereum-server/pkg/router"
-	"Kumazan/go-ethereum-server/pkg/service"
 )
 
 func main() {
-	service := service.New(db.New())
-	router := router.New(service)
-	router.Run()
+	grpcClient := grpc.NewClient()
+	router := router.New(grpcClient)
+	if err := router.Engine.Run(); err != nil {
+		log.Fatalf("failed to run: %v", err)
+	}
 }

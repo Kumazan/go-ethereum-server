@@ -1,0 +1,56 @@
+syntax = "proto3";
+package proto;
+option go_package = "./;pb";
+
+service EthereumService {
+  rpc ListLastestBlocks (ListLastestBlocksRequest) returns (ListLastestBlocksResponse);
+  rpc GetBlock (GetBlockRequest) returns (GetBlockResponse);
+  rpc GetTransaction (GetTransactionRequest) returns (GetTransactionResponse);
+}
+
+message ListLastestBlocksRequest {
+  int32 limit = 1;
+}
+
+message ListLastestBlocksResponse {
+  repeated Block blocks = 1;
+}
+
+message GetBlockRequest {
+  int64 block_num = 1;
+}
+
+message GetBlockResponse {
+  Block block = 1;
+}
+
+message GetTransactionRequest {
+  string tx_hash = 1;
+}
+
+message GetTransactionResponse {
+  Transaction tx = 1;
+}
+
+message Block {
+    int64 block_num = 1;
+    string block_hash = 2;
+    int64 block_time = 3;
+    string parent_hash = 4;
+    repeated string transactions = 5; 
+}
+
+message Transaction {
+    string tx_hash = 1;
+    string from_addr = 2;
+    string to_addr = 3;
+    int64 nonce = 4;
+    string data = 5;
+    string value = 6;
+    repeated Log logs = 7;
+}
+
+message Log {
+    int32 index = 1;
+    string data = 2;
+}

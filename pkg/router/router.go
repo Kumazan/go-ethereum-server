@@ -10,19 +10,22 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/gin-gonic/gin"
 
-	"Kumazan/go-ethereum-server/pkg/service"
+	"Kumazan/go-ethereum-server/pb"
+	"Kumazan/go-ethereum-server/pkg/grpc"
+	"Kumazan/go-ethereum-server/pkg/model"
 )
 
 type Handler struct {
 	*gin.Engine
-
-	es service.EthereumService
+	ctx context.Context
+	ec  *grpc.EthereumClient
 }
 
-func New(es service.EthereumService) Handler {
+func New(ec *grpc.EthereumClient) Handler {
 	h := Handler{
 		Engine: gin.Default(),
-		es:     es,
+		ctx:    context.Background(),
+		ec:     ec,
 	}
 
 	h.GET("/blocks", h.listBlocks)
@@ -48,15 +51,15 @@ func (h *Handler) listBlocks(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
-	blocks, err := h.es.ListLastestBlocks(ctx, limit)
+	req := &pb.ListLastestBlocksRequest{Limit: int32(limit)}
+	resp, err := h.ec.ListLastestBlocks(h.ctx, req)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"blocks": blocks,
+		"blocks": resp.Blocks,
 	})
 }
 
@@ -70,8 +73,8 @@ func (h *Handler) getBlock(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
-	block, err := h.es.GetBlock(ctx, uint64(blockNum))
+	req := &pb.GetBlockRequest{BlockNum: int64(blockNum)}
+	resp, err := h.ec.GetBlock(h.ctx, req)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -83,7 +86,7 @@ func (h *Handler) getBlock(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, block)
+	c.JSON(http.StatusOK, resp.Block)
 }
 
 var hashValidator = regexp.MustCompile(`^0x([A-Fa-f0-9]{64})$`)
@@ -97,8 +100,8 @@ func (h *Handler) getTransaction(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
-	tx, err := h.es.GetTransaction(ctx, txHash)
+	req := &pb.GetTransactionRequest{TxHash: txHash}
+	resp, err := h.ec.GetTransaction(h.ctx, req)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -110,5 +113,21 @@ func (h *Handler) getTransaction(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, tx)
+	tx := resp.Tx
+	logs := make([]model.Log, len(tx.Logs))
+	for i, log := range tx.Logs {
+		logs[i] = model.Log{
+			Index: uint(log.Index),
+			Data:  log.Data,
+		}
+	}
+	c.JSON(http.StatusOK, model.Transaction{
+		TxHash:   tx.TxHash,
+		FromAddr: tx.FromAddr,
+		ToAddr:   tx.ToAddr,
+		Nonce:    uint64(tx.Nonce),
+		Data:     tx.Data,
+		Value:    tx.Value,
+		Logs:     logs,
+	})
 }

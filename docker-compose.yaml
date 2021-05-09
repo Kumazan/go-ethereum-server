@@ -1,17 +1,30 @@
 version: '3.4'
 services:
-  rest:
+  indexer:
+    restart: always
     build:
       context: .
-      dockerfile: ./Dockerfile
+      dockerfile: ./cmd/indexer/Dockerfile
     working_dir: /cmd
     depends_on:
       - pg
-    entrypoint: ./rest
+    entrypoint: ./indexer
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - 5001:5001
+  rest:
+    restart: always
+    build:
+      context: .
+      dockerfile: ./cmd/rest/Dockerfile
+    working_dir: /cmd
+    depends_on:
+      - pg
+      - indexer
+    entrypoint: ./rest
     ports:
       - 8080:8080
   pg:

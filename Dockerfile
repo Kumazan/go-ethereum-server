@@ -1,7 +1,13 @@
-FROM golang:1.16.4-alpine
+FROM golang:1.16.4-alpine AS builder
 RUN apk add build-base
+RUN apk add --no-cache git
 WORKDIR /go/src
 COPY . .
-RUN apk add --no-cache git
 RUN go get -d -v ./...
-EXPOSE 8080
+RUN go build -o /go/bin/rest cmd/rest/main.go 
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+ENTRYPOINT /cmd
+COPY db/migrations /cmd/db/migrations
+COPY --from=builder /go/bin/rest /cmd/rest

@@ -3,13 +3,11 @@ services:
   rest:
     build:
       context: .
-      dockerfile: Dockerfile
-    working_dir: /rest
-    volumes:
-      - .:/rest
+      dockerfile: ./Dockerfile
+    working_dir: /cmd
     depends_on:
       - pg
-    entrypoint: go run cmd/rest/main.go
+    entrypoint: ./rest
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

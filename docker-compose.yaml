@@ -1,5 +1,21 @@
 version: '3.4'
 services:
+  rest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /rest
+    volumes:
+      - .:/rest
+    depends_on:
+      - pg
+    entrypoint: go run cmd/rest/main.go
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - 8080:8080
   pg:
     image: postgres
     restart: always

@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/big"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -18,6 +19,7 @@ type EthereumService interface {
 	ListLastestBlocks(ctx context.Context, limit int) ([]*model.Block, error)
 	GetBlock(ctx context.Context, num uint64) (*model.Block, error)
 	GetTransaction(ctx context.Context, txHash string) (*model.Transaction, error)
+	RetrieveBlocks(ctx context.Context)
 }
 
 type service struct {
@@ -33,6 +35,21 @@ func New(db *gorm.DB) EthereumService {
 		log.Fatalf("ethclient.Dial failed: %+v", err)
 	}
 	return &service{ec: ec, db: db}
+}
+
+func (s *service) RetrieveBlocks(ctx context.Context) {
+	limit := 0
+	for range time.Tick(time.Second * 3) {
+		if limit < 1000 {
+			limit += 100
+		}
+
+		_, err := s.ListLastestBlocks(ctx, limit)
+		if err != nil {
+			log.Printf("ListLastestBlocks failed: %v\n", err)
+			continue
+		}
+	}
 }
 
 func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Block, error) {

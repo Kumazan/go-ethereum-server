@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 
@@ -15,6 +16,9 @@ const (
 
 func main() {
 	service := service.New(db.New())
+	go func() {
+		service.RetrieveBlocks(context.Background())
+	}()
 	server := grpc.NewServer(service)
 
 	lis, err := net.Listen("tcp", port)

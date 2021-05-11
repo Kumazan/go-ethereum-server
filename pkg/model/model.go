@@ -35,6 +35,10 @@ func NewBlock(b *types.Block) *Block {
 	}
 }
 
+func (b Block) MarshalBinary() (data []byte, err error) {
+	return json.Marshal(b)
+}
+
 type Transaction struct {
 	TxHash   string `json:"tx_hash" gorm:"primaryKey"`
 	BlockNum uint64 `json:"-"`

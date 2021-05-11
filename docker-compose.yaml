@@ -8,11 +8,13 @@ services:
     working_dir: /cmd
     depends_on:
       - pg
+      - redis
     entrypoint: ./indexer
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_ADDR: 'redis:6379'
     ports:
       - 5001:5001
   rest:
@@ -30,9 +32,16 @@ services:
   pg:
     image: postgres
     restart: always
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - 5627:5432
+  redis:
+    image: "redis:alpine"
+    restart: always
+volumes:
+  pgdata:

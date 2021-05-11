@@ -8,6 +8,7 @@ import (
 	"Kumazan/go-ethereum-server/db"
 	"Kumazan/go-ethereum-server/pkg/grpc"
 	"Kumazan/go-ethereum-server/pkg/service"
+	"Kumazan/go-ethereum-server/redis"
 )
 
 const (
@@ -15,7 +16,7 @@ const (
 )
 
 func main() {
-	service := service.New(db.New())
+	service := service.New(db.New(), redis.NewClient())
 	go func() {
 		service.RetrieveBlocks(context.Background())
 	}()

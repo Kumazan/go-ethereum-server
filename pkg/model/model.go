@@ -84,3 +84,7 @@ func NewTransaction(tx *types.Transaction) *Transaction {
 		Value:    tx.Value().String(),
 	}
 }
+
+func (tx Transaction) MarshalBinary() (data []byte, err error) {
+	return json.Marshal(tx)
+}

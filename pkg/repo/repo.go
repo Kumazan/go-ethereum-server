@@ -24,8 +24,10 @@ type Repo interface {
 
 	GetBlockNumber(ctx context.Context) (uint64, error)
 	SetBlockNumber(ctx context.Context, num uint64) error
-	GetBlock(ctx context.Context, num uint64) (*model.Block, error)
-	SetBlock(ctx context.Context, num uint64, block *model.Block) error
+	GetBlockCache(ctx context.Context, num uint64) (*model.Block, error)
+	SetBlockCache(ctx context.Context, num uint64, block *model.Block) error
+	GetTxCache(ctx context.Context, txHash string) (*model.Transaction, error)
+	SetTxCache(ctx context.Context, txHash string, tx *model.Transaction) error
 
 	LockBlockNumber(ctx context.Context) (bool, error)
 	UnlockBlockNumber(ctx context.Context) error
@@ -38,11 +40,13 @@ const (
 	blockNumberLockKey  = "retrieve-block-number-lock"
 	blockCacheKeyPrefix = "block:"
 	blockLockKeyPrefix  = "retrieve-block-lock:"
+	txCacheKeyPrefix    = "transaction:"
 
 	blockNumberCacheTTL = time.Second * 5
 	blockNumberLockTTL  = time.Second * 3
 	blockCacheTTL       = time.Hour
 	blockLockTTL        = time.Second * 3
+	txCacheTTL          = time.Hour
 )
 
 var (
@@ -123,7 +127,7 @@ func (repo *repo) UnlockBlockNumber(ctx context.Context) error {
 	return repo.redis.Del(ctx, blockNumberLockKey).Err()
 }
 
-func (repo *repo) GetBlock(ctx context.Context, num uint64) (*model.Block, error) {
+func (repo *repo) GetBlockCache(ctx context.Context, num uint64) (*model.Block, error) {
 	key := fmt.Sprintf("%s%d", blockCacheKeyPrefix, num)
 	res, err := repo.redis.Get(ctx, key).Result()
 	if err == redis.Nil {
@@ -140,7 +144,7 @@ func (repo *repo) GetBlock(ctx context.Context, num uint64) (*model.Block, error
 	return block, nil
 }
 
-func (repo *repo) SetBlock(ctx context.Context, num uint64, block *model.Block) error {
+func (repo *repo) SetBlockCache(ctx context.Context, num uint64, block *model.Block) error {
 	key := fmt.Sprintf("%s%d", blockCacheKeyPrefix, num)
 	return repo.redis.Set(ctx, key, block, blockCacheTTL).Err()
 }
@@ -157,4 +161,26 @@ func (repo *repo) LockBlock(ctx context.Context, num uint64) (bool, error) {
 func (repo *repo) UnlockBlock(ctx context.Context, num uint64) error {
 	key := fmt.Sprintf("%s%d", blockLockKeyPrefix, num)
 	return repo.redis.Del(ctx, key).Err()
+}
+
+func (repo *repo) GetTxCache(ctx context.Context, txHash string) (*model.Transaction, error) {
+	key := fmt.Sprintf("%s%s", txCacheKeyPrefix, txHash)
+	res, err := repo.redis.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var tx *model.Transaction
+	err = json.Unmarshal([]byte(res), &tx)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (repo *repo) SetTxCache(ctx context.Context, txHash string, tx *model.Transaction) error {
+	key := fmt.Sprintf("%s%s", txCacheKeyPrefix, txHash)
+	return repo.redis.Set(ctx, key, tx, txCacheTTL).Err()
 }

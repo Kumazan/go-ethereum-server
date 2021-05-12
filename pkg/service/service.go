@@ -203,9 +203,9 @@ func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 }
 
 func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, bool, error) {
-	block, err := s.repo.GetBlock(ctx, num)
+	block, err := s.repo.GetBlockCache(ctx, num)
 	if err != nil && err != repo.ErrNotFound {
-		log.Printf("repo.GetBlock failed: %+v", err)
+		log.Printf("repo.GetBlockCache failed: %+v", err)
 		return nil, false, err
 	}
 	if err == nil {
@@ -229,9 +229,9 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 			}
 		}()
 
-		block, err := s.repo.GetBlock(ctx, num)
+		block, err := s.repo.GetBlockCache(ctx, num)
 		if err != nil && err != repo.ErrNotFound {
-			log.Printf("repo.GetBlock failed: %+v", err)
+			log.Printf("repo.GetBlockCache failed: %+v", err)
 			return nil, false, err
 		}
 		if err == nil {
@@ -254,39 +254,45 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 	for i := range block.Transactions {
 		block.TxHash[i] = block.Transactions[i].TxHash
 	}
-	err = s.repo.SetBlock(ctx, num, block)
+	err = s.repo.SetBlockCache(ctx, num, block)
 	if err != nil {
-		log.Printf("repo.SetBlock failed: %+v", err)
-		return nil, false, err
+		log.Printf("repo.SetBlockCache failed: %+v", err)
 	}
 	return block, true, nil
 }
 
 func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Transaction, error) {
+	tx, err := s.repo.GetTxCache(ctx, txHash)
+	if err == nil {
+		return tx, nil
+	}
+	if err != nil && err != repo.ErrNotFound {
+		log.Printf("repo.GetTxCache failed: %+v", err)
+		return nil, err
+	}
 
-	tx, err := s.repo.GetTransaction(txHash)
-	if err != nil {
-		if err != repo.ErrNotFound {
-			log.Printf("repo.GetTransaction failed: %+v", err)
-			return nil, err
-		}
-
+	tx, err = s.repo.GetTransaction(txHash)
+	if err != nil && err != repo.ErrNotFound {
+		log.Printf("repo.GetTransaction failed: %+v", err)
+		return nil, err
+	}
+	if err == repo.ErrNotFound {
 		txn, _, err := s.ec.TransactionByHash(ctx, common.HexToHash(txHash))
 		if err != nil {
 			if err == ethereum.NotFound {
+				// TODO: cache not found
 				return nil, ErrNotFound
 			}
 			log.Printf("TransactionByHash failed: %+v", err)
 			return nil, err
 		}
 		tx = model.NewTransaction(txn)
-
-		err = s.repo.CreateTransaction(tx)
-		if err != nil {
+		if err := s.repo.CreateTransaction(tx); err != nil {
 			log.Printf("repo.CreateTransaction failed: %v", err)
 		}
 	}
-	if len(tx.Logs) == 0 {
+
+	if tx.Logs == nil {
 		receipt, err := s.ec.TransactionReceipt(ctx, common.HexToHash(txHash))
 		if err != nil {
 			log.Printf("TransactionReceipt failed: %+v", err)
@@ -299,10 +305,13 @@ func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Tra
 				Data:  common.BytesToHash(log.Data).String(),
 			}
 		}
-
 		if err := s.repo.UpdateTransactionLogs(tx); err != nil {
 			log.Printf("repo.UpdateTransactionLogs failed: %v", err)
 		}
+	}
+
+	if err := s.repo.SetTxCache(ctx, txHash, tx); err != nil {
+		log.Printf("repo.SetTxCache failed: %v", err)
 	}
 
 	return tx, nil

@@ -131,6 +131,13 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 }
 
 func (s *service) GetBlock(ctx context.Context, num uint64) (*model.Block, error) {
+	currentNum, err := s.RetrieveBlockNumber(ctx)
+	if err != nil {
+		log.Printf("repo.GetBlockNumber failed: %+v", err)
+	} else if num > currentNum {
+		return nil, ErrNotFound
+	}
+
 	block, isNew, err := s.RetrieveBlock(ctx, num)
 	if err != nil {
 		log.Printf("RetrieveBlock failed: %+v", err)

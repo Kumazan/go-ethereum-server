@@ -2,13 +2,13 @@ package router
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"Kumazan/go-ethereum-server/pb"
 	"Kumazan/go-ethereum-server/pkg/grpc"
@@ -76,9 +76,10 @@ func (h *Handler) getBlock(c *gin.Context) {
 	req := &pb.GetBlockRequest{BlockNum: int64(blockNum)}
 	resp, err := h.ec.GetBlock(h.ctx, req)
 	if err != nil {
-		if errors.Is(err, ethereum.NotFound) {
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.NotFound {
 			c.JSON(http.StatusNotFound, gin.H{
-				"message": "block not found",
+				"message": status.Message(),
 			})
 			return
 		}
@@ -103,9 +104,10 @@ func (h *Handler) getTransaction(c *gin.Context) {
 	req := &pb.GetTransactionRequest{TxHash: txHash}
 	resp, err := h.ec.GetTransaction(h.ctx, req)
 	if err != nil {
-		if errors.Is(err, ethereum.NotFound) {
+		status, ok := status.FromError(err)
+		if ok && status.Code() == codes.NotFound {
 			c.JSON(http.StatusNotFound, gin.H{
-				"message": "txHash not found",
+				"message": status.Message(),
 			})
 			return
 		}

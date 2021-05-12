@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"Kumazan/go-ethereum-server/pb"
 	"Kumazan/go-ethereum-server/pkg/service"
@@ -42,6 +44,9 @@ func (s *EthereumServer) ListLastestBlocks(ctx context.Context, req *pb.ListLast
 
 func (s *EthereumServer) GetBlock(ctx context.Context, req *pb.GetBlockRequest) (*pb.GetBlockResponse, error) {
 	b, err := s.svc.GetBlock(ctx, uint64(req.BlockNum))
+	if err == service.ErrNotFound {
+		return &pb.GetBlockResponse{}, status.Error(codes.NotFound, "block not found")
+	}
 	if err != nil {
 		return &pb.GetBlockResponse{}, err
 	}
@@ -58,6 +63,9 @@ func (s *EthereumServer) GetBlock(ctx context.Context, req *pb.GetBlockRequest) 
 
 func (s *EthereumServer) GetTransaction(ctx context.Context, req *pb.GetTransactionRequest) (*pb.GetTransactionResponse, error) {
 	tx, err := s.svc.GetTransaction(ctx, req.TxHash)
+	if err == service.ErrNotFound {
+		return &pb.GetTransactionResponse{}, status.Error(codes.NotFound, "transaction not found")
+	}
 	if err != nil {
 		return &pb.GetTransactionResponse{}, err
 	}

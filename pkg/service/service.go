@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math/big"
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -20,6 +22,8 @@ type EthereumService interface {
 	GetTransaction(ctx context.Context, txHash string) (*model.Transaction, error)
 	RetrieveBlocks(ctx context.Context)
 }
+
+var ErrNotFound = errors.New("not found")
 
 type service struct {
 	ec   *ethclient.Client
@@ -232,6 +236,9 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 
 	b, err := s.ec.BlockByNumber(ctx, big.NewInt(int64(num)))
 	if err != nil {
+		if err == ethereum.NotFound {
+			return nil, false, ErrNotFound
+		}
 		log.Printf("BlockByNumber failed: %+v", err)
 		return nil, false, err
 	}
@@ -259,6 +266,9 @@ func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Tra
 
 		txn, _, err := s.ec.TransactionByHash(ctx, common.HexToHash(txHash))
 		if err != nil {
+			if err == ethereum.NotFound {
+				return nil, ErrNotFound
+			}
 			log.Printf("TransactionByHash failed: %+v", err)
 			return nil, err
 		}

@@ -2,21 +2,16 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"math/big"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/go-redis/redis/v8"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"Kumazan/go-ethereum-server/pkg/model"
+	"Kumazan/go-ethereum-server/pkg/repo"
 )
 
 type EthereumService interface {
@@ -27,26 +22,21 @@ type EthereumService interface {
 }
 
 type service struct {
-	ec    *ethclient.Client
-	db    *gorm.DB
-	redis *redis.Client
+	ec   *ethclient.Client
+	repo repo.Repo
 }
 
 const rpcEndpoint = "https://data-seed-prebsc-2-s3.binance.org:8545"
 
-func New(db *gorm.DB, redis *redis.Client) EthereumService {
+func New(repo repo.Repo) EthereumService {
 	ec, err := ethclient.Dial(rpcEndpoint)
 	if err != nil {
 		log.Fatalf("ethclient.Dial failed: %+v", err)
 	}
-	return &service{ec: ec, db: db, redis: redis}
+	return &service{ec: ec, repo: repo}
 }
 
 func (s *service) RetrieveBlocks(ctx context.Context) {
-	const (
-		dataKey = "block-number"
-		dataTTL = time.Second * 3
-	)
 
 	limit := 0
 	for range time.Tick(time.Second * 3) {
@@ -59,9 +49,9 @@ func (s *service) RetrieveBlocks(ctx context.Context) {
 			log.Printf("BlockNumber failed: %v\n", err)
 			continue
 		}
-		err = s.redis.Set(ctx, dataKey, blockNumber, dataTTL).Err()
+		err = s.repo.SetBlockNumber(ctx, blockNumber)
 		if err != nil {
-			log.Printf("redis.Set failed: %+v", err)
+			log.Printf("repo.SetBlockNumber failed: %+v", err)
 			continue
 		}
 
@@ -81,9 +71,11 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 	fromNumber := blockNumber - uint64(limit) + 1
 	toNumber := blockNumber
 
-	savedBlocks := make([]*model.Block, 0, limit)
-	s.db.Where("block_num BETWEEN ? AND ?", fromNumber, toNumber).
-		Order("block_num desc").Find(&savedBlocks)
+	savedBlocks, err := s.repo.ListBlocks(fromNumber, toNumber)
+	if err != nil {
+		log.Printf("repo.ListBlocks failed: %v", err)
+		return nil, err
+	}
 	if len(savedBlocks) == limit {
 		return savedBlocks, nil
 	}
@@ -124,8 +116,7 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 	for b := range newBlocks {
 		blocksToCreate = append(blocksToCreate, b)
 	}
-	err = s.db.Clauses(clause.OnConflict{UpdateAll: true}).
-		Create(blocksToCreate).Error
+	err = s.repo.CreateBlocks(blocksToCreate...)
 	if err != nil {
 		log.Printf("db.Create failed: %+v", err)
 		return nil, err
@@ -142,43 +133,28 @@ func (s *service) GetBlock(ctx context.Context, num uint64) (*model.Block, error
 		return nil, err
 	}
 	if isNew {
-		s.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&block)
-	}
-
-	block.TxHash = make([]string, len(block.Transactions))
-	for i := range block.Transactions {
-		block.TxHash[i] = block.Transactions[i].TxHash
+		err = s.repo.CreateBlocks(block)
+		if err != nil {
+			log.Printf("repo.CreateBlock failed: %+v", err)
+		}
 	}
 	return block, nil
 }
 
 func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
-	const (
-		dataTTL = time.Second * 3
-		lockTTL = time.Second * 3
-	)
-	var (
-		dataKey = "block-number"
-		lockKey = "retrieve-block-number-lock"
-	)
-	res, err := s.redis.Get(ctx, dataKey).Result()
-	if err != nil && err != redis.Nil {
-		log.Printf("redis.Get failed: %+v", err)
+	num, err := s.repo.GetBlockNumber(ctx)
+	if err != nil && err != repo.ErrNotFound {
+		log.Printf("repo.GetBlockNumber failed: %+v", err)
 		return 0, err
 	}
-	if len(res) > 0 {
-		blockNum, err := strconv.Atoi(res)
-		if err != nil {
-			log.Printf("strconv.Atoi %v failed: %+v", res, err)
-			return 0, err
-		}
-		return uint64(blockNum), nil
+	if err == nil {
+		return num, nil
 	}
 
 	for {
-		getLock, err := s.redis.SetNX(ctx, lockKey, true, lockTTL).Result()
+		getLock, err := s.repo.LockBlockNumber(ctx)
 		if err != nil {
-			log.Printf("redis.SetNX failed: %+v", err)
+			log.Printf("repo.LockBlockNumber failed: %+v", err)
 			return 0, err
 		}
 
@@ -186,21 +162,19 @@ func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 			continue
 		}
 		defer func() {
-			s.redis.Del(ctx, lockKey)
+			err := s.repo.UnlockBlockNumber(ctx)
+			if err != nil {
+				log.Printf("repo.UnlockBlockNumber failed: %+v", err)
+			}
 		}()
 
-		res, err := s.redis.Get(ctx, dataKey).Result()
-		if err != nil && err != redis.Nil {
-			log.Printf("redis.Get failed: %+v", err)
+		num, err := s.repo.GetBlockNumber(ctx)
+		if err != nil && err != repo.ErrNotFound {
+			log.Printf("repo.GetBlockNumber failed: %+v", err)
 			return 0, err
 		}
-		if len(res) > 0 {
-			blockNum, err := strconv.Atoi(res)
-			if err != nil {
-				log.Printf("strconv.Atoi %v failed: %+v", res, err)
-				return 0, err
-			}
-			return uint64(blockNum), nil
+		if err == nil {
+			return num, nil
 		}
 		break
 	}
@@ -209,39 +183,28 @@ func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	err = s.redis.Set(ctx, dataKey, blockNumber, dataTTL).Err()
+	err = s.repo.SetBlockNumber(ctx, blockNumber)
 	if err != nil {
-		log.Printf("redis.Set failed: %+v", err)
+		log.Printf("repo.SetBlockNumber failed: %+v", err)
 		return 0, err
 	}
 	return blockNumber, nil
 }
 
 func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, bool, error) {
-	const lockTTL = time.Second * 3
-	var (
-		dataKey = fmt.Sprintf("block:%d", num)
-		lockKey = fmt.Sprintf("retrieve-block-lock:%d", num)
-	)
-	res, err := s.redis.Get(ctx, dataKey).Result()
-	if err != nil && err != redis.Nil {
-		log.Printf("redis.Get failed: %+v", err)
+	block, err := s.repo.GetBlock(ctx, num)
+	if err != nil && err != repo.ErrNotFound {
+		log.Printf("repo.GetBlock failed: %+v", err)
 		return nil, false, err
 	}
-	if len(res) > 0 {
-		var block *model.Block
-		err := json.Unmarshal([]byte(res), &block)
-		if err != nil {
-			log.Printf("json.Unmarshal %v failed: %+v", res, err)
-			return nil, false, err
-		}
+	if err == nil {
 		return block, false, nil
 	}
 
 	for {
-		getLock, err := s.redis.SetNX(ctx, lockKey, 1, lockTTL).Result()
+		getLock, err := s.repo.LockBlock(ctx, num)
 		if err != nil {
-			log.Printf("redis.SetNX failed: %+v", err)
+			log.Printf("repo.LockBlock failed: %+v", err)
 			return nil, false, err
 		}
 
@@ -249,21 +212,18 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 			continue
 		}
 		defer func() {
-			s.redis.Del(ctx, lockKey)
+			err := s.repo.UnlockBlock(ctx, num)
+			if err != nil {
+				log.Printf("repo.UnlockBlockNumber failed: %+v", err)
+			}
 		}()
 
-		res, err := s.redis.Get(ctx, dataKey).Result()
-		if err != nil && err != redis.Nil {
-			log.Printf("redis.Get failed: %+v", err)
+		block, err := s.repo.GetBlock(ctx, num)
+		if err != nil && err != repo.ErrNotFound {
+			log.Printf("repo.GetBlock failed: %+v", err)
 			return nil, false, err
 		}
-		if len(res) > 0 {
-			var block *model.Block
-			err := json.Unmarshal([]byte(res), &block)
-			if err != nil {
-				log.Printf("json.Unmarshal %v failed: %+v", res, err)
-				return nil, false, err
-			}
+		if err == nil {
 			return block, false, nil
 		}
 
@@ -275,22 +235,25 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 		log.Printf("BlockByNumber failed: %+v", err)
 		return nil, false, err
 	}
-	block := model.NewBlock(b)
-	err = s.redis.Set(ctx, dataKey, block, time.Hour).Err()
+	block = model.NewBlock(b)
+	block.TxHash = make([]string, len(block.Transactions))
+	for i := range block.Transactions {
+		block.TxHash[i] = block.Transactions[i].TxHash
+	}
+	err = s.repo.SetBlock(ctx, num, block)
 	if err != nil {
-		log.Printf("redis.Set failed: %+v", err)
+		log.Printf("repo.SetBlock failed: %+v", err)
 		return nil, false, err
 	}
 	return block, true, nil
 }
 
 func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Transaction, error) {
-	var tx *model.Transaction
 
-	err := s.db.Where("tx_hash = ?", txHash).First(&tx).Error
+	tx, err := s.repo.GetTransaction(txHash)
 	if err != nil {
-		if err != gorm.ErrRecordNotFound {
-			log.Printf("db.First failed: %+v", err)
+		if err != repo.ErrNotFound {
+			log.Printf("repo.GetTransaction failed: %+v", err)
 			return nil, err
 		}
 
@@ -301,7 +264,10 @@ func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Tra
 		}
 		tx = model.NewTransaction(txn)
 
-		s.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&tx)
+		err = s.repo.CreateTransaction(tx)
+		if err != nil {
+			log.Printf("repo.CreateTransaction failed: %v", err)
+		}
 	}
 	if len(tx.Logs) == 0 {
 		receipt, err := s.ec.TransactionReceipt(ctx, common.HexToHash(txHash))
@@ -316,10 +282,9 @@ func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Tra
 				Data:  common.BytesToHash(log.Data).String(),
 			}
 		}
-		value, _ := tx.Logs.Value()
-		if err := s.db.Model(&tx).Update("logs", value).Error; err != nil {
-			log.Printf("Update tx.Logs failed: %+v, logs = %+v", err, tx.Logs)
-			return nil, err
+
+		if err := s.repo.UpdateTransactionLogs(tx); err != nil {
+			log.Printf("repo.UpdateTransactionLogs failed: %v", err)
 		}
 	}
 

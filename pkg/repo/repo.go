@@ -16,16 +16,16 @@ import (
 )
 
 type Repo interface {
-	ListBlocks(fromNum, toNum uint64) ([]*model.Block, error)
 	CreateBlocks(block ...*model.Block) error
 	GetTransaction(txHash string) (*model.Transaction, error)
 	CreateTransaction(tx *model.Transaction) error
 	UpdateTransactionLogs(tx *model.Transaction) error
 
+	ListBlocks(ctx context.Context, fromNum, toNum uint64) ([]*model.Block, error)
 	GetBlockNumber(ctx context.Context) (uint64, error)
 	SetBlockNumber(ctx context.Context, num uint64) error
 	GetBlockCache(ctx context.Context, num uint64) (*model.Block, error)
-	SetBlockCache(ctx context.Context, num uint64, block *model.Block) error
+	SetBlockCache(ctx context.Context, block ...*model.Block) error
 	GetTxCache(ctx context.Context, txHash string) (*model.Transaction, error)
 	SetTxCache(ctx context.Context, txHash string, tx *model.Transaction) error
 
@@ -38,13 +38,13 @@ type Repo interface {
 const (
 	blockNumberCacheKey = "block-number"
 	blockNumberLockKey  = "retrieve-block-number-lock"
+	blockListCacheKey   = "blocks"
 	blockCacheKeyPrefix = "block:"
 	blockLockKeyPrefix  = "retrieve-block-lock:"
 	txCacheKeyPrefix    = "transaction:"
 
 	blockNumberCacheTTL = time.Second * 5
 	blockNumberLockTTL  = time.Second * 3
-	blockCacheTTL       = time.Hour
 	blockLockTTL        = time.Second * 3
 	txCacheTTL          = time.Hour
 )
@@ -62,11 +62,24 @@ func New(db *gorm.DB, redis *redis.Client) Repo {
 	return &repo{db: db, redis: redis}
 }
 
-func (repo *repo) ListBlocks(fromNum, toNum uint64) ([]*model.Block, error) {
-	blocks := make([]*model.Block, 0, toNum-fromNum)
-	if err := repo.db.Where("block_num BETWEEN ? AND ?", fromNum, toNum).
-		Order("block_num desc").Find(&blocks).Error; err != nil {
+func (repo *repo) ListBlocks(ctx context.Context, fromNum, toNum uint64) ([]*model.Block, error) {
+	zset, err := repo.redis.ZRevRangeByScore(ctx, blockListCacheKey,
+		&redis.ZRangeBy{
+			Min: fmt.Sprint(fromNum),
+			Max: fmt.Sprint(toNum),
+		}).Result()
+	if err != nil {
 		return nil, err
+	}
+
+	blocks := make([]*model.Block, len(zset))
+	for i, b := range zset {
+		var block *model.Block
+		err := json.Unmarshal([]byte(b), &block)
+		if err != nil {
+			return nil, err
+		}
+		blocks[i] = block
 	}
 	return blocks, nil
 }
@@ -144,9 +157,26 @@ func (repo *repo) GetBlockCache(ctx context.Context, num uint64) (*model.Block, 
 	return block, nil
 }
 
-func (repo *repo) SetBlockCache(ctx context.Context, num uint64, block *model.Block) error {
-	key := fmt.Sprintf("%s%d", blockCacheKeyPrefix, num)
-	return repo.redis.Set(ctx, key, block, blockCacheTTL).Err()
+func (repo *repo) SetBlockCache(ctx context.Context, blocks ...*model.Block) error {
+	msetValues := make(map[string]interface{}, len(blocks))
+	zmembers := make([]*redis.Z, len(blocks))
+	for i, block := range blocks {
+		num := block.BlockNum
+		key := fmt.Sprintf("%s%d", blockCacheKeyPrefix, num)
+		value, _ := block.MarshalBinary()
+		msetValues[key] = value
+		block.Transactions = nil
+		block.TxHash = nil
+		zmembers[i] = &redis.Z{
+			Score:  float64(num),
+			Member: block,
+		}
+	}
+	err := repo.redis.MSet(ctx, msetValues).Err()
+	if err != nil {
+		return err
+	}
+	return repo.redis.ZAdd(ctx, blockListCacheKey, zmembers...).Err()
 }
 
 func (repo *repo) LockBlock(ctx context.Context, num uint64) (bool, error) {

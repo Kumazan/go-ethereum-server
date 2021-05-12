@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -75,7 +76,7 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 	fromNumber := blockNumber - uint64(limit) + 1
 	toNumber := blockNumber
 
-	savedBlocks, err := s.repo.ListBlocks(fromNumber, toNumber)
+	savedBlocks, err := s.repo.ListBlocks(ctx, fromNumber, toNumber)
 	if err != nil {
 		log.Printf("repo.ListBlocks failed: %v", err)
 		return nil, err
@@ -116,16 +117,21 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 	wg.Wait()
 	close(newBlocks)
 
-	blocksToCreate := make([]*model.Block, 0, newCount)
-	for b := range newBlocks {
-		blocksToCreate = append(blocksToCreate, b)
+	if newCount > 0 {
+		blocksToCreate := make([]*model.Block, 0, newCount)
+		for b := range newBlocks {
+			blocksToCreate = append(blocksToCreate, b)
+		}
+		err = s.repo.CreateBlocks(blocksToCreate...)
+		if err != nil {
+			log.Printf("db.Create failed: %+v", err)
+			return nil, err
+		}
+		err = s.repo.SetBlockCache(ctx, blocksToCreate...)
+		if err != nil {
+			log.Printf("repo.SetBlockCache failed: %+v", err)
+		}
 	}
-	err = s.repo.CreateBlocks(blocksToCreate...)
-	if err != nil {
-		log.Printf("db.Create failed: %+v", err)
-		return nil, err
-	}
-	// log.Printf("%d new blocks created", newCount)
 
 	return blocks, nil
 }
@@ -147,6 +153,10 @@ func (s *service) GetBlock(ctx context.Context, num uint64) (*model.Block, error
 		err = s.repo.CreateBlocks(block)
 		if err != nil {
 			log.Printf("repo.CreateBlock failed: %+v", err)
+		}
+		err = s.repo.SetBlockCache(ctx, block)
+		if err != nil {
+			log.Printf("repo.SetBlockCache failed: %+v", err)
 		}
 	}
 	return block, nil
@@ -253,10 +263,6 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 	block.TxHash = make([]string, len(block.Transactions))
 	for i := range block.Transactions {
 		block.TxHash[i] = block.Transactions[i].TxHash
-	}
-	err = s.repo.SetBlockCache(ctx, num, block)
-	if err != nil {
-		log.Printf("repo.SetBlockCache failed: %+v", err)
 	}
 	return block, true, nil
 }

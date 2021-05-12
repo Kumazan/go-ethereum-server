@@ -88,7 +88,7 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 
 	blocks := make([]*model.Block, limit)
 
-	newCount := 0
+	var newCount uint64
 	newBlocks := make(chan *model.Block, limit)
 	var index int
 	for num := toNumber; num >= fromNumber; num-- {
@@ -108,7 +108,7 @@ func (s *service) ListLastestBlocks(ctx context.Context, limit int) ([]*model.Bl
 			}
 			blocks[toNumber-num] = block
 			if isNew {
-				newCount++
+				atomic.AddUint64(&newCount, 1)
 				newBlocks <- block
 			}
 		}(num)

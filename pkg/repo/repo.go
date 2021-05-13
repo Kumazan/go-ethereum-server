@@ -169,8 +169,6 @@ func (repo *repo) SetBlockCache(ctx context.Context, blocks ...*model.Block) err
 		key := fmt.Sprintf("%s%d", blockCacheKeyPrefix, num)
 		value, _ := block.MarshalBinary()
 		msetValues[key] = value
-		block.Transactions = nil
-		block.TxHash = nil
 		zmembers[i] = &redis.Z{
 			Score:  float64(num),
 			Member: block,

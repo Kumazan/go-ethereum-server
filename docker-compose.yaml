@@ -1,4 +1,4 @@
-version: '3.4'
+version: "3.4"
 services:
   indexer:
     restart: always
@@ -14,7 +14,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_ADDR: 'redis:6379'
+      POSTGRES_HOST: pg
+      POSTGRES_PORT: 5432
+      REDIS_ADDR: redis:6379
     ports:
       - 5001:5001
   rest:
@@ -24,9 +26,10 @@ services:
       dockerfile: ./cmd/rest/Dockerfile
     working_dir: /cmd
     depends_on:
-      - pg
       - indexer
     entrypoint: ./rest
+    environment:
+      INDEXER_ADDR: indexer:5001
     ports:
       - 8080:8080
   pg:

@@ -13,9 +13,6 @@ import (
 )
 
 const (
-	dbHost = "pg"
-	dbPort = 5432
-
 	migrationPath = "file://db/migrations"
 )
 
@@ -23,10 +20,13 @@ var (
 	dbName     = os.Getenv("POSTGRES_DB")
 	dbUser     = os.Getenv("POSTGRES_USER")
 	dbPassword = os.Getenv("POSTGRES_PASSWORD")
+
+	dbHost = os.Getenv("POSTGRES_HOST")
+	dbPort = os.Getenv("POSTGRES_PORT")
 )
 
 func init() {
-	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
+	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%v/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
 
 	m, err := migrate.New(migrationPath, dbURL)
 	if err != nil {

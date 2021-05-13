@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
@@ -15,8 +16,8 @@ type EthereumClient struct {
 	pb.EthereumServiceClient
 }
 
-const (
-	address = "indexer:5001"
+var (
+	address = os.Getenv("INDEXER_ADDR")
 )
 
 func NewClient() *EthereumClient {

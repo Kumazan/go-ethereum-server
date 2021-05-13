@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -47,7 +46,7 @@ func (s *service) RetrieveBlocks(ctx context.Context) {
 
 	limit := 0
 	for range time.Tick(time.Second * 3) {
-		if limit < 10000 {
+		if limit < 1000 {
 			limit += 100
 		}
 
@@ -265,21 +264,15 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 		break
 	}
 
-	operation := func() error {
-		b, err := s.ec.BlockByNumber(ctx, big.NewInt(int64(num)))
-		if err != nil {
-			log.Printf("BlockByNumber failed: %+v", err)
-			return err
-		}
-		block = model.NewBlock(b)
-		return nil
-	}
-
-	err = backoff.Retry(operation, backoff.NewExponentialBackOff())
+	b, err := s.ec.BlockByNumber(ctx, big.NewInt(int64(num)))
 	if err != nil {
+		if err == ethereum.NotFound {
+			return nil, false, ErrNotFound
+		}
+		log.Printf("BlockByNumber failed: %+v", err)
 		return nil, false, err
 	}
-
+	block = model.NewBlock(b)
 	block.TxHash = make([]string, len(block.Transactions))
 	for i := range block.Transactions {
 		block.TxHash[i] = block.Transactions[i].TxHash

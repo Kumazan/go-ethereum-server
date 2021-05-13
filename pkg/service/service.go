@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,10 +33,8 @@ type service struct {
 	repo repo.Repo
 }
 
-const rpcEndpoint = "https://data-seed-prebsc-2-s3.binance.org:8545"
-
 func New(repo repo.Repo) EthereumService {
-	ec, err := ethclient.Dial(rpcEndpoint)
+	ec, err := ethclient.Dial(os.Getenv("RPC_ENDPOINT"))
 	if err != nil {
 		log.Fatalf("ethclient.Dial failed: %+v", err)
 	}

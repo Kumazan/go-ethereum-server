@@ -33,6 +33,8 @@ type Repo interface {
 	UnlockBlockNumber(ctx context.Context) error
 	LockBlock(ctx context.Context, num uint64) (bool, error)
 	UnlockBlock(ctx context.Context, num uint64) error
+	LockTransaction(ctx context.Context, txHash string) (bool, error)
+	UnlockTransaction(ctx context.Context, txHash string) error
 }
 
 const (
@@ -42,11 +44,13 @@ const (
 	blockCacheKeyPrefix = "block:"
 	blockLockKeyPrefix  = "retrieve-block-lock:"
 	txCacheKeyPrefix    = "transaction:"
+	txLockKeyPrefix     = "transaction-lock:"
 
 	blockNumberCacheTTL = time.Second * 5
 	blockNumberLockTTL  = time.Second * 3
 	blockLockTTL        = time.Second * 3
 	txCacheTTL          = time.Hour
+	txLockTTL           = time.Second * 3
 )
 
 var (
@@ -213,4 +217,18 @@ func (repo *repo) GetTxCache(ctx context.Context, txHash string) (*model.Transac
 func (repo *repo) SetTxCache(ctx context.Context, txHash string, tx *model.Transaction) error {
 	key := fmt.Sprintf("%s%s", txCacheKeyPrefix, txHash)
 	return repo.redis.Set(ctx, key, tx, txCacheTTL).Err()
+}
+
+func (repo *repo) LockTransaction(ctx context.Context, txHash string) (bool, error) {
+	key := fmt.Sprintf("%s%s", txLockKeyPrefix, txHash)
+	getLock, err := repo.redis.SetNX(ctx, key, true, blockLockTTL).Result()
+	if err != nil {
+		return false, err
+	}
+	return getLock, err
+}
+
+func (repo *repo) UnlockTransaction(ctx context.Context, txHash string) error {
+	key := fmt.Sprintf("%s%s", txLockKeyPrefix, txHash)
+	return repo.redis.Del(ctx, key).Err()
 }

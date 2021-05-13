@@ -164,12 +164,12 @@ func (s *service) GetBlock(ctx context.Context, num uint64) (*model.Block, error
 
 func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 	num, err := s.repo.GetBlockNumber(ctx)
-	if err != nil && err != repo.ErrNotFound {
-		log.Printf("repo.GetBlockNumber failed: %+v", err)
-		return 0, err
-	}
 	if err == nil {
 		return num, nil
+	}
+	if err != repo.ErrNotFound {
+		log.Printf("repo.GetBlockNumber failed: %+v", err)
+		return 0, err
 	}
 
 	for {
@@ -190,12 +190,12 @@ func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 		}()
 
 		num, err := s.repo.GetBlockNumber(ctx)
-		if err != nil && err != repo.ErrNotFound {
-			log.Printf("repo.GetBlockNumber failed: %+v", err)
-			return 0, err
-		}
 		if err == nil {
 			return num, nil
+		}
+		if err != repo.ErrNotFound {
+			log.Printf("repo.GetBlockNumber failed: %+v", err)
+			return 0, err
 		}
 		break
 	}
@@ -214,12 +214,12 @@ func (s *service) RetrieveBlockNumber(ctx context.Context) (uint64, error) {
 
 func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, bool, error) {
 	block, err := s.repo.GetBlockCache(ctx, num)
-	if err != nil && err != repo.ErrNotFound {
-		log.Printf("repo.GetBlockCache failed: %+v", err)
-		return nil, false, err
-	}
 	if err == nil {
 		return block, false, nil
+	}
+	if err != repo.ErrNotFound {
+		log.Printf("repo.GetBlockCache failed: %+v", err)
+		return nil, false, err
 	}
 
 	for {
@@ -235,17 +235,17 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 		defer func() {
 			err := s.repo.UnlockBlock(ctx, num)
 			if err != nil {
-				log.Printf("repo.UnlockBlockNumber failed: %+v", err)
+				log.Printf("repo.UnlockBlock failed: %+v", err)
 			}
 		}()
 
 		block, err := s.repo.GetBlockCache(ctx, num)
-		if err != nil && err != repo.ErrNotFound {
-			log.Printf("repo.GetBlockCache failed: %+v", err)
-			return nil, false, err
-		}
 		if err == nil {
 			return block, false, nil
+		}
+		if err != repo.ErrNotFound {
+			log.Printf("repo.GetBlockCache failed: %+v", err)
+			return nil, false, err
 		}
 
 		break
@@ -270,23 +270,55 @@ func (s *service) RetrieveBlock(ctx context.Context, num uint64) (*model.Block, 
 func (s *service) GetTransaction(ctx context.Context, txHash string) (*model.Transaction, error) {
 	tx, err := s.repo.GetTxCache(ctx, txHash)
 	if err == nil {
+		if tx.TxHash == "" {
+			return nil, ErrNotFound
+		}
 		return tx, nil
 	}
-	if err != nil && err != repo.ErrNotFound {
+	if err != repo.ErrNotFound {
 		log.Printf("repo.GetTxCache failed: %+v", err)
 		return nil, err
 	}
 
 	tx, err = s.repo.GetTransaction(txHash)
-	if err != nil && err != repo.ErrNotFound {
-		log.Printf("repo.GetTransaction failed: %+v", err)
-		return nil, err
-	}
-	if err == repo.ErrNotFound {
+	if err != nil {
+		if err != repo.ErrNotFound {
+			log.Printf("repo.GetTransaction failed: %+v", err)
+			return nil, err
+		}
+
+		for {
+			getLock, err := s.repo.LockTransaction(ctx, txHash)
+			if err != nil {
+				log.Printf("repo.LockTransaction failed: %+v", err)
+				return nil, err
+			}
+
+			if !getLock {
+				continue
+			}
+			defer func() {
+				err := s.repo.UnlockTransaction(ctx, txHash)
+				if err != nil {
+					log.Printf("repo.UnlockTransaction failed: %+v", err)
+				}
+			}()
+
+			tx, err := s.repo.GetTxCache(ctx, txHash)
+			if err == nil {
+				return tx, nil
+			}
+			if err != repo.ErrNotFound {
+				log.Printf("repo.GetTxCache failed: %+v", err)
+				return nil, err
+			}
+			break
+		}
+
 		txn, _, err := s.ec.TransactionByHash(ctx, common.HexToHash(txHash))
 		if err != nil {
 			if err == ethereum.NotFound {
-				// TODO: cache not found
+				s.repo.SetTxCache(ctx, txHash, &model.Transaction{})
 				return nil, ErrNotFound
 			}
 			log.Printf("TransactionByHash failed: %+v", err)

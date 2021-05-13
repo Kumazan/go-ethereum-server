@@ -44,7 +44,7 @@ func (h *Handler) listBlocks(c *gin.Context) {
 		})
 		return
 	}
-	if limit < 0 || limit > 1024 {
+	if limit < 0 || limit > 10000 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "limit is invalid",
 		})

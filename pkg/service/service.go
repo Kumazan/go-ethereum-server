@@ -41,6 +41,8 @@ func New(repo repo.Repo) EthereumService {
 	return &service{ec: ec, repo: repo}
 }
 
+const unstableBlockCount = 20
+
 func (s *service) RetrieveBlocks(ctx context.Context) {
 
 	limit := 0
@@ -60,10 +62,22 @@ func (s *service) RetrieveBlocks(ctx context.Context) {
 			continue
 		}
 
-		_, err = s.ListLastestBlocks(ctx, limit)
+		blocks, err := s.ListLastestBlocks(ctx, limit)
 		if err != nil {
 			log.Printf("ListLastestBlocks failed: %v\n", err)
 			continue
+		}
+
+		for num := unstableBlockCount; num > 0; num-- {
+			if blocks[num-1].ParentHash != blocks[num].BlockHash {
+				if err := s.repo.DelBlockCache(ctx, blocks[:num]...); err != nil {
+					log.Printf("repo.DelBlockCache failed: %v\n", err)
+				}
+				if _, err := s.ListLastestBlocks(ctx, unstableBlockCount); err != nil {
+					log.Printf("ListLastestBlocks failed: %v\n", err)
+				}
+				break
+			}
 		}
 	}
 }

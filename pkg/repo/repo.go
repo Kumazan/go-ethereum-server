@@ -26,6 +26,7 @@ type Repo interface {
 	SetBlockNumber(ctx context.Context, num uint64) error
 	GetBlockCache(ctx context.Context, num uint64) (*model.Block, error)
 	SetBlockCache(ctx context.Context, block ...*model.Block) error
+	DelBlockCache(ctx context.Context, block ...*model.Block) error
 	GetTxCache(ctx context.Context, txHash string) (*model.Transaction, error)
 	SetTxCache(ctx context.Context, txHash string, tx *model.Transaction) error
 
@@ -179,6 +180,20 @@ func (repo *repo) SetBlockCache(ctx context.Context, blocks ...*model.Block) err
 		return err
 	}
 	return repo.redis.ZAdd(ctx, blockListCacheKey, zmembers...).Err()
+}
+
+func (repo *repo) DelBlockCache(ctx context.Context, blocks ...*model.Block) error {
+	delKeys := make([]string, len(blocks))
+	zmembers := make([]interface{}, len(blocks))
+	for i, block := range blocks {
+		delKeys[i] = fmt.Sprintf("%s%d", blockCacheKeyPrefix, block.BlockNum)
+		zmembers[i] = block
+	}
+	err := repo.redis.Del(ctx, delKeys...).Err()
+	if err != nil {
+		return err
+	}
+	return repo.redis.ZRem(ctx, blockListCacheKey, zmembers...).Err()
 }
 
 func (repo *repo) LockBlock(ctx context.Context, num uint64) (bool, error) {
